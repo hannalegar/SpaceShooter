@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>Space Shooter</title>
+		<style>
+			canvas {
+				position: absolute;
+				top: 0px;
+				left: 0px;
+				background: transparent;
+			}
+            #background{
+                z-index: -2;
+            }
+            #main {
+                z-index: -1;
+            }
+            #ship {
+                z-index: 0;
+            }
+            @font-face{
+                font-family: "kenvector_future";
+                src: url('assets/SpaceShooterRedux/Bonus/kenvector_future_thin.ttf');
+            }
+            .score {
+                position: absolute;
+				top: 20px;
+				left: 30px;
+				color: white;
+				font-family: kenvector_future;
+                font-size: 20px;
+				cursor: default;
+            }
+            .game-over {
+				position: relative;
+                text-align: center;
+                top: 300px;
+				color: white;
+				font-family: kenvector_future;
+				font-size: 50px;
+				cursor: default;
+				display: none;
+            }
+            .game-over span{
+				font-size: 30px;
+				cursor: pointer;
+				position: relative;
+            }
+            .game-over span:hover{ 
+                color: #BBBBBB;
+            }
+            #choose {
+                font-family: kenvector_future;
+                font-size: 50px;
+                position: relative;
+                text-align: center;
+                top: 250px;
+                display: none;
+                color: white;
+            }
+		</style>
+	</head>
+	<body>
+		<canvas id="background" width="1920" height="1080"></canvas>
+        <canvas id="main" width="1920" height="1080"></canvas>
+        <canvas id="ship" width="1920" height="1080"></canvas>
+        <canvas id="imaginary" width="1920" height="1080" style="display: none"></canvas>
+
+        <div class="score" id="scoreId">SCORE: <span id="score"></span></div>
+		<div class="game-over" id="game-over">GAME OVER<p><span onclick="game.restart()">Restart</span></p></div>
+        <div id="choose">Choose a ship!</div>
+
+        <script src="http://ephubudw2270:8000/socket.io/socket.io.js"></script>
+        
+        <script src="js/imageRepository.js"></script>
+        <script src="js/drawable.js"></script>
+        <script src="js/pool.js"></script>
+        <script src="js/bullet.js"></script>
+        <script src="js/ship.js"></script>
+        <script src="js/background.js"></script>
+        <script src="js/enemy.js"></script>
+        <script src="js/remotePlayers.js"></script>
+        <script src="js/boss.js"></script>
+        <script src="js/quadTree.js"></script>
+        <script src="js/soundPool.js"></script>
+        <script src="js/meteor.js"></script>
+        <script src="js/bonus.js"></script>
+        <script src="js/shield.js"></script>
+        <script src="js/animation.js"></script>
+        <script src="js/game.js"></script>
+
+		<script>
+           // debugger;
+            var canvas = document.getElementById('main');
+            var socket;
+
+            var KEY_CODES = {
+                32: 'space',
+                37: 'left',
+                38: 'up',
+                39: 'right',
+                40: 'down'
+            }
+
+            KEY_STATUS = {};
+            for(code in KEY_CODES){
+                KEY_STATUS[ KEY_CODES[ code ]] = false;
+            }
+
+            document.onkeydown = function(e){
+                var keyCode = (e.keyCode) ? e.keyCode : e.charCode;
+                if(KEY_CODES[keyCode]){
+                    e.preventDefault();
+                    KEY_STATUS[KEY_CODES[keyCode]] = true;
+                }
+            }
+
+            document.onkeyup = function(e){
+                var keyCode = (e.keyCode) ? e.keyCode : e.charCode;
+                if(KEY_CODES[keyCode]){
+                    e.preventDefault();
+                    KEY_STATUS[KEY_CODES[keyCode]] = false;
+                }
+            }
+
+            
+            function checkReadyState(){
+                if(game.gameOverAudio.readyState === 4){
+                    window.clearInterval(game.checkAudio);
+                    game.startAnimation();
+                }
+            }
+            
+
+            function detectCollision(){
+                var objects = [];
+                game.quadTree.getAllObjects(objects);
+                this.C = {x: 0, y: 0, X: 0, Y: 0};
+                this.ictx = document.getElementById("imaginary").getContext("2d");
+                this.iObject;
+                this.iObj;
+
+                for(var x = 0, len = objects.length; x < len; x++){
+                    game.quadTree.findObjects(obj = [], objects[x]);
+                    for(var y = 0, length = obj.length; y < length; y++){
+                        if(objects[x].collidableWith.includes(obj[y].type) &&
+                        (objects[x].x < obj[y].x + obj[y].width &&
+                        objects[x].x + objects[x].width > obj[y].x &&
+                        objects[x].y < obj[y].y + obj[y].height &&
+                        objects[x].y + objects[x].height > obj[y].y)){
+
+                            this.C.x = objects[x].x < obj[y].x ? obj[y].x : objects[x].x;
+                            this.C.y = objects[x].y < obj[y].y ? obj[y].y : objects[x].y ;
+                            this.C.X = objects[x].x + objects[x].width < obj[y].x + obj[y].width ? objects[x].x + objects[x].width : obj[y].x + obj[y].width;
+                            this.C.Y = objects[x].y + objects[x].width < obj[y].y + obj[y].height ? objects[x].y + objects[x].height : obj[y].y + obj[y].height;
+
+                            if(objects[x].img == undefined){
+                                continue;
+                            }
+                            
+                            /*
+                            if((objects[x].type == "bullet" || obj[y].type == "bullet") && (objects[x].type == "boss" || obj[y].type == "boss")){
+                                console.log("objects[x]: " + objects[x]);
+                                console.log("obj[y]: " + obj[y]);
+                                debugger;
+                            }
+                            */
+
+                            this.ictx.clearRect(this.C.x, this.C.y, this.C.X - this.C.x, this.C.Y - this.C.y);
+                            this.ictx.drawImage(objects[x].img, objects[x].x, objects[x].y, objects[x].width, objects[x].height);
+                            this.iObject = ictx.getImageData(this.C.x, this.C.y, (this.C.X - this.C.x || 1), (this.C.Y - this.C.y || 1));
+
+                            this.ictx.clearRect(this.C.x, this.C.y, this.C.X - this.C.x, this.C.Y - this.C.y);
+                            this.ictx.drawImage(obj[y].img, obj[y].x, obj[y].y, obj[y].width, obj[y].height);
+                            this.iObj = ictx.getImageData(this.C.x, this.C.y, (this.C.X - this.C.x || 1), (this.C.Y - this.C.y || 1));
+
+                            this.length = this.iObj.data.length;
+                            this.resolution = 4 * 5;
+                            for(var i = 0; i < this.length; i += this.resolution){
+                                if(!this.iObject.data[i + 3] || !this.iObj.data[i + 3]){
+                                    continue;
+                                }
+                                else{
+                                    if((objects[x].alive && obj[y].alive) && (!objects[x].isColliding && !obj[y].isColliding) && (objects[x].y >= 0 && obj[y].y >= 0)){
+                                        if((objects[x].type == "bullet" || obj[y].type == "bullet") && (objects[x].type == "enemy" || obj[y].type == "enemy")){
+                                         //   debugger;
+                                            game.playerScore += 10;
+                                        }
+                                        /*
+                                        if(objects[x].type == "ship"){
+                                            objects[x].colliding(obj[y]);
+                                            obj[y].colliding();
+                                        }
+                                        else if(obj[y].type == "ship") {
+                                            obj[y].colliding(objects[x]);   
+                                            objects[x].colliding();
+                                        }
+                                        else{*/
+                                            objects[x].colliding(obj[y]);
+                                            obj[y].colliding(objects[x]);
+                                       // }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            var game = new Game();
+                
+            function init() {
+               socket = io.connect("http://localhost", {port: 8000, transports: ["websocket"]});
+               setEventHandlers();
+
+               game.init();
+            }
+
+            function setEventHandlers() {
+                socket.on("connect", onSocketConnected);
+                socket.on("disconnect", onSocketDisconnect);
+                socket.on("new player", onNewPlayer);
+                socket.on("move player", onMovePlayer);
+                socket.on("remove player", onRemovePlayer);
+                socket.on("fire", onFire);
+                socket.on("damage", onDamage);
+            }
+
+            function onSocketConnected() {
+                console.log("Connected to socket server");
+                socket.emit("new player", {x: game.ship.x, y: game.ship.y});
+            };
+
+            function onSocketDisconnect() {
+                console.log("Disconnected from socket server");
+            };
+
+            function onNewPlayer(data) {
+                console.log("New player connected: " + data.id);
+                var remoteShip = new RemotePlayers(data.id);
+                remoteShip.spawn(data.x, data.y, 10);
+                game.remotePlayers.set(remoteShip);
+            };
+
+            function onMovePlayer(data) {
+                var movePlayer = game.remotePlayers.getById(data.id);
+                if(!movePlayer){
+                    console.log("Player not found: " + data.id);
+                }
+                
+                console.log('player moved');
+
+                movePlayer.x = data.x;
+                movePlayer.y = data.y;
+                movePlayer.angle = data.angle;
+                movePlayer.yPrevKey = data.yPrevKey;
+            };
+
+            function onFire(data){
+                console.log("player get fire: " + data.id);
+                var player = game.remotePlayers.getById(data.id);
+                
+                if(!player){
+                    console.log("Player not found: " + data.id);
+                }
+
+                player.getFire = data.fire;
+            }
+
+            function onRemovePlayer(data) {
+                var removePlayer = game.remotePlayers.getById(data.id);
+
+                if(!removePlayer){
+                    console.log("Player not found: " + data.id);
+                    return;
+                }
+
+                console.log("Player has removed: " + data.id);
+                game.remotePlayers.pool.splice(game.remotePlayers.pool.indexOf(removePlayer), 1);
+            };
+
+            function onDamage(data){
+                var player = game.remotePlayers.getById(data.id);
+
+                if(!player){
+                    console.log("Player not found: " + data.id);
+                    return;
+                }
+
+                player.status = data.status;
+            }
+
+            function update(){
+                if(game.ship.move()){
+                    socket.emit("move player", {x: game.ship.x, y: game.ship.y, angle: game.ship.angle, yPrevKey: game.ship.yPrevKey});
+                }
+                if(game.ship.status){
+                    socket.emit("damage", {status: game.ship.status});
+                }
+                if(!game.ship.alive){
+                    socket.emit("remove player", {id: game.ship.id});
+                }
+                if(game.ship.getFire != game.ship.prevGetFire){
+                    socket.emit("fire", {fire: game.ship.getFire});
+                }
+            }
+
+            function animate() {
+                requestAnimFrame( animate );
+                
+                switch(game.state){
+                    case "START_SCREEN":
+                        document.getElementById('scoreId').style.display = "none";
+                        game.background.draw();
+                        game.startScreen();
+                        break;
+                    case "GAME_SCREEN":
+                        game.ship.getFire = false;
+                        document.getElementById('score').innerHTML = game.playerScore;
+                        document.getElementById('scoreId').style.display = "block";
+
+                        game.ship.draw();
+
+                        game.quadTree.clear();
+                        game.quadTree.insert(game.ship);
+                        game.quadTree.insert(game.ship.bulletPool.getPool());
+                        //game.quadTree.insert(game.enemyPool.getPool());
+                        game.quadTree.insert(game.enemyBulletPool.getPool());
+                        game.quadTree.insert(game.meteorPool.getPool());
+                        game.quadTree.insert(game.shield);
+                        game.quadTree.insert(game.shield.bonus);
+                        game.quadTree.insert(game.remotePlayers.pool);
+                       // game.quadTree.insert(game.boss);
+                        game.quadTree.insert(game.laserBonus);
+                        detectCollision();
+                        game.clearContext();
+
+                        if(!game.shield.bonus.alive && !game.shield.alive){
+                            if(Math.floor(Math.random() * 10000) % Math.floor(Math.random() * 5000) == 0){
+                                game.shield.newBonus();
+                            }
+                        }
+
+                        update();
+
+                        if(game.ship.alive){
+                            game.background.draw();
+                            game.meteorPool.animate();
+                            game.remotePlayers.animate();
+                            game.ship.move();
+                           /* if(!game.boss.alive){
+                                game.enemyPool.animate();
+                            }*/
+                            game.animationPool.animate();
+                            game.enemyBulletPool.animate();
+                            game.ship.bulletPool.animate();
+                            if(game.shield.bonus.alive){
+                                game.shield.bonus.draw();
+                            }
+                            /*if(game.boss.alive){
+                                game.boss.draw();
+                            }*/
+                           // game.shield.draw(game.ship.x, game.ship.y, game.ship.width, game.ship.height);
+
+                            if(!game.ship.laserBonus && !game.laserBonus.alive){
+                                if(Math.floor(Math.random() * 5000) % Math.floor(Math.random() * 5000) == 0){
+                                    game.generateLaserBonus();
+                                }
+                            }
+
+                            if(game.ship.laserBonus){
+                                game.ship.laserTime = Date.now();
+                               // console.log(game.ship.laserTime - game.ship.laserInitTime);
+                                if(game.ship.laserTime - game.ship.laserInitTime >= 10000){
+                                    game.ship.laserBonus = false;
+                                    game.ship.lasersNum = 2;
+                                }
+                            }
+                            game.laserBonus.draw();
+                        }
+
+                      /*  if(game.enemyPool.getPool().length == 0 && !game.boss.alive){
+                            if(game.enemyWaves > 0){
+                                game.playerScore += 50;
+                                game.generateBoss();
+                            }
+                            game.spawnWave();
+                        }
+*/
+                        else if(!game.ship.alive){
+                            game.state = "GAME_OVER_SCREEN";
+                        }
+
+                      //  debugger;
+                        break;
+                    case "GAME_OVER_SCREEN":
+                        game.gameOver();
+                        break;
+                }
+            }
+
+            window.requestAnimFrame = (function(){
+                return  window.requestAnimationFrame   ||
+                        window.webkitRequestAnimationFrame ||
+                        window.mozRequestAnimationFrame    ||
+                        window.oRequestAnimationFrame      ||
+                        window.msRequestAnimationFrame     ||
+                        function(callback, element){
+                            window.setTimeout(callback, 1000 / 60);
+                        };
+            })();
+
+            document.addEventListener('click', clickHandler, false);
+
+            function clickHandler(e){
+                switch (game.state){
+                    case "START_SCREEN":
+                        for(var i = 0; i < game.playerShips.length; i++){
+                        var ship = game.playerShips[i];
+                     //   debugger;
+                     /*
+                        console.log("e.clientX - canvas.offsetLeft: " + (e.clientX - canvas.offsetLeft));
+                        console.log("e.clientY: " + e.clientY);
+                        console.log("ship.x: " + ship.x);
+                        console.log("ship.x + ship.width: " + (ship.x + ship.width));
+                        console.log("ship.y: " + ship.y);
+                        console.log("ship.height: " + (ship.y + ship.height));
+                        */
+                        if(e.clientX - canvas.offsetLeft >= ship.x && e.clientX - canvas.offsetLeft <= ship.x + ship.width && e.clientY >= ship.y && e.clientY <= ship.y + ship.height){
+                            game.ship.img = ship.img;
+                            game.ship.width = ship.width;
+                            game.ship.height = ship.height;
+                            game.ship.lifeImg = imageRepository.allPlayerLife[ship.i][ship.j].img;
+                            document.getElementById('choose').style.display = "none";
+                            game.state = "GAME_SCREEN";
+                            }
+                        }
+                    break;
+                }
+            }
+
+            var TO_RADIANS = Math.PI / 180;
+            function drawRotatedImage(context, image, x, y, angle){
+                context.save();
+                context.translate(x, y);
+                context.rotate(angle * TO_RADIANS);
+                context.drawImage(image, -(image.width / 2), -(image.height / 2));
+                context.restore();
+            }
+
+            /*               
+            bcgCanvas.width = window.innerWidth;
+            bcgCanvas.height = window.innerHeight;
+
+            function fullscreen(){
+                var backg = document.getElementById('background');
+        
+                if(backg.webkitRequestFullScreen) {
+                    backg.webkitRequestFullScreen();
+                }
+                else {
+                    backg.mozRequestFullScreen();
+                }
+            }
+ 
+            bcgCanvas.addEventListener("click", fullscreen);
+            */
+        </script>
+    </body>
+</html>
